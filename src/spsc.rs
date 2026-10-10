@@ -26,7 +26,10 @@ impl<T, const N: usize> SpscQueue<T, N> {
     const INIT: UnsafeCell<MaybeUninit<T>> = UnsafeCell::new(MaybeUninit::uninit());
 
     const CHECK_POWER_OF_TWO: () = {
-        assert!(N.is_power_of_two(), "SpscQueue capacity N must be a power of two!");
+        assert!(
+            N.is_power_of_two(),
+            "SpscQueue capacity N must be a power of two!"
+        );
     };
 
     pub const fn new() -> Self {
@@ -79,6 +82,10 @@ impl<T, const N: usize> SpscQueue<T, N> {
     pub fn split(&mut self) -> (Producer<'_, T, N>, Consumer<'_, T, N>) {
         (Producer { queue: self }, Consumer { queue: self })
     }
+
+    pub const fn capacity(&self) -> usize {
+        N - 1
+    }
 }
 
 pub struct Producer<'a, T, const N: usize> {
@@ -86,8 +93,26 @@ pub struct Producer<'a, T, const N: usize> {
 }
 
 impl<'a, T, const N: usize> Producer<'a, T, N> {
+    #[inline(always)]
     pub fn push(&mut self, val: T) -> Result<(), T> {
         self.queue.push(val)
+    }
+
+    pub fn vacant_len(&self) -> usize {
+        let head = self.queue.head.0.load(Ordering::Relaxed);
+        let tail = self.queue.tail.0.load(Ordering::Acquire);
+
+        tail.wrapping_sub(head).wrapping_sub(1) & (N - 1)
+    }
+
+    #[inline(always)]
+    pub fn is_full(&self) -> bool {
+        self.vacant_len() == 0
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.vacant_len() == (N - 1)
     }
 }
 
@@ -96,7 +121,25 @@ pub struct Consumer<'a, T, const N: usize> {
 }
 
 impl<'a, T, const N: usize> Consumer<'a, T, N> {
+    #[inline(always)]
     pub fn pop(&mut self) -> Option<T> {
         self.queue.pop()
+    }
+
+    #[inline(always)]
+    pub fn occupied_len(&self) -> usize {
+        let tail = self.queue.tail.0.load(Ordering::Relaxed);
+        let head = self.queue.head.0.load(Ordering::Acquire);
+        head.wrapping_sub(tail) & (N - 1)
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.occupied_len() == 0
+    }
+
+    #[inline(always)]
+    pub fn is_full(&self) -> bool {
+        self.occupied_len() == (N - 1)
     }
 }
