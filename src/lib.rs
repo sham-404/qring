@@ -8,7 +8,7 @@ mod tests {
 
     #[test]
     fn pushpop() {
-        let mut queue = SpscQueue::<i32, 10>::new();
+        let mut queue = SpscQueue::<i32, 16>::new();
         let (mut prod, mut cons) = queue.split();
 
         assert_eq!(cons.pop(), None);

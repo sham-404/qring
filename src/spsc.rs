@@ -4,10 +4,13 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+#[repr(align(64))]
+struct CacheAligned<T>(T);
+
 pub struct SpscQueue<T, const N: usize> {
     buffer: [UnsafeCell<MaybeUninit<T>>; N],
-    head: AtomicUsize,
-    tail: AtomicUsize,
+    head: CacheAligned<AtomicUsize>,
+    tail: CacheAligned<AtomicUsize>,
 }
 
 unsafe impl<T: Send, const N: usize> Sync for SpscQueue<T, N> {}
@@ -21,19 +24,28 @@ impl<T, const N: usize> Drop for SpscQueue<T, N> {
 
 impl<T, const N: usize> SpscQueue<T, N> {
     const INIT: UnsafeCell<MaybeUninit<T>> = UnsafeCell::new(MaybeUninit::uninit());
+
+    const CHECK_POWER_OF_TWO: () = {
+        assert!(N.is_power_of_two(), "SpscQueue capacity N must be a power of two!");
+    };
+
     pub const fn new() -> Self {
+        // Touch the const assertion during construction
+        // to guarantee a build failure if invalid
+        let _ = Self::CHECK_POWER_OF_TWO;
+
         SpscQueue {
             buffer: [Self::INIT; N],
-            head: AtomicUsize::new(0),
-            tail: AtomicUsize::new(0),
+            head: CacheAligned(AtomicUsize::new(0)),
+            tail: CacheAligned(AtomicUsize::new(0)),
         }
     }
 
     fn push(&self, val: T) -> Result<(), T> {
-        let head = self.head.load(Ordering::Relaxed);
+        let head = self.head.0.load(Ordering::Relaxed);
+        let tail = self.tail.0.load(Ordering::Acquire);
 
-        let tail = self.tail.load(Ordering::Acquire);
-        let next_head = (head + 1) % N;
+        let next_head = (head + 1) & (N - 1);
 
         if next_head == tail {
             return Err(val);
@@ -43,14 +55,14 @@ impl<T, const N: usize> SpscQueue<T, N> {
             (*self.buffer[head].get()).write(val);
         }
 
-        self.head.store(next_head, Ordering::Release);
+        self.head.0.store(next_head, Ordering::Release);
 
         Ok(())
     }
 
     fn pop(&self) -> Option<T> {
-        let tail = self.tail.load(Ordering::Relaxed);
-        let head = self.head.load(Ordering::Acquire);
+        let tail = self.tail.0.load(Ordering::Relaxed);
+        let head = self.head.0.load(Ordering::Acquire);
 
         if tail == head {
             return None;
@@ -58,8 +70,8 @@ impl<T, const N: usize> SpscQueue<T, N> {
 
         let val = unsafe { (*self.buffer[tail].get()).assume_init_read() };
 
-        let next_tail = (tail + 1) % N;
-        self.tail.store(next_tail, Ordering::Release);
+        let next_tail = (tail + 1) & (N - 1);
+        self.tail.0.store(next_tail, Ordering::Release);
 
         Some(val)
     }
