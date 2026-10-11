@@ -22,13 +22,13 @@ mod tests {
         assert_eq!(cons.pop(), Some(30));
         assert_eq!(cons.pop(), None);
 
-        for i in 0..9 {
+        for i in 0..prod.vacant_len() as i32 {
             assert_eq!(prod.push(i), Ok(()));
         }
 
         assert_eq!(prod.push(999), Err(999));
 
-        for i in 0..9 {
+        for i in 0..cons.occupied_len() as i32 {
             assert_eq!(cons.pop(), Some(i));
         }
 
