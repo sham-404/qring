@@ -4,7 +4,8 @@ pub mod spsc;
 
 #[cfg(test)]
 mod tests {
-    use crate::spsc::SpscQueue;
+    use super::spsc::SpscQueue;
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn pushpop() {
@@ -37,5 +38,54 @@ mod tests {
         assert!(prod.push(100).is_ok());
         assert_eq!(cons.pop(), Some(100));
         assert_eq!(cons.pop(), None);
+    }
+
+    /// Tests split-chunk `copy_nonoverlapping` wraparound logic across the buffer boundary.
+    #[test]
+    fn miri_wraparound_bulk_ops() {
+        let mut queue = SpscQueue::<u8, 8>::new();
+        let (mut prod, mut cons) = queue.split();
+
+        assert_eq!(prod.push_slice(&[1, 2, 3, 4, 5]), 5);
+
+        let mut tmp = [0u8; 4];
+        assert_eq!(cons.pop_slice(&mut tmp), 4);
+        assert_eq!(tmp, [1, 2, 3, 4]);
+
+        assert_eq!(prod.push_exact(&[10, 20, 30, 40, 50]), Ok(()));
+
+        let mut out = [0u8; 6];
+        assert_eq!(cons.pop_slice(&mut out), 6);
+        assert_eq!(out, [5, 10, 20, 30, 40, 50]);
+    }
+
+    /// Verifies Drop for SpscQueue correctly cleans up unconsumed items without leaks or double-frees using core only.
+    #[test]
+    fn miri_drop_unconsumed_leak_check() {
+        struct DropTracker(*const AtomicUsize);
+
+        impl Drop for DropTracker {
+            fn drop(&mut self) {
+                unsafe {
+                    (*self.0).fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+
+        let drops = AtomicUsize::new(0);
+
+        {
+            let mut queue = SpscQueue::<DropTracker, 8>::new();
+            let (mut prod, mut cons) = queue.split();
+
+            let _ = prod.push(DropTracker(&drops));
+            let _ = prod.push(DropTracker(&drops));
+            let _ = prod.push(DropTracker(&drops));
+
+            drop(cons.pop());
+            assert_eq!(drops.load(Ordering::Relaxed), 1);
+        } // queue drops here, executing Drop for SpscQueue and cleaning up the remaining 2 items
+
+        assert_eq!(drops.load(Ordering::Relaxed), 3);
     }
 }
