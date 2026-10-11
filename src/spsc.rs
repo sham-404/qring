@@ -1,3 +1,26 @@
+//! A lock-free single-producer single-consumer (SPSC) queue.
+//!
+//! The queue has a fixed capacity determined at compile time by the const
+//! generic `N`. It is backed by a ring buffer where one slot is always kept
+//! free to distinguish a full queue from an empty one, so the usable capacity
+//! is `N - 1`.
+//!
+//! Because it is an SPSC queue, exactly one thread may hold the [`Producer`]
+//! and exactly one thread may hold the [`Consumer`]. Ownership is enforced by
+//! [`SpscQueue::split`], which borrows the queue and hands out one of each.
+//!
+//! # Example
+//!
+//! ```
+//! use axon::spsc::SpscQueue;
+//!
+//! let mut queue = SpscQueue::<u32, 16>::new();
+//! let (mut producer, mut consumer) = queue.split();
+//!
+//! producer.push(42).unwrap();
+//! assert_eq!(consumer.pop(), Some(42));
+//! ```
+
 use core::{
     cell::UnsafeCell,
     mem::MaybeUninit,
@@ -21,12 +44,22 @@ impl<T> DerefMut for CacheAligned<T> {
     }
 }
 
+/// A fixed-capacity, lock-free single-producer single-consumer queue.
+///
+/// The queue stores up to `N - 1` elements of type `T`. `N` **must** be a power
+/// of two; this is checked at compile time. The extra slot is used to tell a
+/// full queue apart from an empty one.
+///
+/// Create a queue with [`SpscQueue::new`] and then call
+/// [`split`](SpscQueue::split) to obtain a [`Producer`] and a [`Consumer`].
+/// Each half may be moved to a different thread, but there may only ever be one
+/// of each.
 pub struct SpscQueue<T, const N: usize> {
     buffer: [UnsafeCell<MaybeUninit<T>>; N],
 
-    // aligning head and tail to 64 bytes so that one L1 cache fetch fetches only 
-    // head or tail, so no false fetching happens for other data, thus maintaining
-    // code execution speed at maximum
+    // Aligning head and tail to 64-byte cache line boundaries eliminates
+    // false sharing (cache line bouncing) between producer and consumer cores. so
+    // code execution speed is at maximum
     head: CacheAligned<AtomicUsize>,
     tail: CacheAligned<AtomicUsize>,
 }
@@ -50,6 +83,22 @@ impl<T, const N: usize> SpscQueue<T, N> {
         );
     };
 
+    /// Creates a new empty queue.
+    ///
+    /// `N` is the size of the backing ring buffer and must be a power of two;
+    /// passing a non-power-of-two value fails compilation. The usable capacity
+    /// is `N - 1`, available via [`capacity`](SpscQueue::capacity).
+    ///
+    /// This is a `const fn`, so it can be used in `static`/`const` contexts.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use axon::spsc::SpscQueue;
+    ///
+    /// let queue = SpscQueue::<u8, 8>::new();
+    /// assert_eq!(queue.capacity(), 7);
+    /// ```
     pub const fn new() -> Self {
         // Touch the const assertion during construction
         // to guarantee a build failure if invalid
@@ -99,25 +148,87 @@ impl<T, const N: usize> SpscQueue<T, N> {
         Some(val)
     }
 
+    /// Splits the queue into a [`Producer`] and a [`Consumer`].
+    ///
+    /// The returned halves borrow the queue mutably for the duration of their
+    /// lifetime, so no other access to the queue is possible while they exist.
+    /// Move the [`Producer`] to the producing thread and the [`Consumer`] to
+    /// the consuming thread.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use axon::spsc::SpscQueue;
+    ///
+    /// let mut queue = SpscQueue::<u32, 4>::new();
+    /// let (mut producer, mut consumer) = queue.split();
+    ///
+    /// producer.push(1).unwrap();
+    /// assert_eq!(consumer.pop(), Some(1));
+    /// ```
     pub fn split(&mut self) -> (Producer<'_, T, N>, Consumer<'_, T, N>) {
         (Producer { queue: self }, Consumer { queue: self })
     }
 
+    /// Returns the number of elements the queue can hold.
+    ///
+    /// This is always `N - 1` because one slot is reserved internally to
+    /// distinguish a full queue from an empty one.
     pub const fn capacity(&self) -> usize {
         N - 1
     }
 }
 
+/// The producing half of an [`SpscQueue`], obtained from [`SpscQueue::split`].
+///
+/// This handle owns the sole permission to enqueue values. It may be sent to
+/// another thread, but there must only ever be one [`Producer`] per queue.
 pub struct Producer<'a, T, const N: usize> {
     queue: &'a SpscQueue<T, N>,
 }
 
 impl<'a, T, const N: usize> Producer<'a, T, N> {
+    /// Pushes a single value onto the queue.
+    ///
+    /// On success returns `Ok(())`. If the queue is full the value is returned
+    /// back inside `Err` so no data is lost.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use axon::spsc::SpscQueue;
+    ///
+    /// let mut queue = SpscQueue::<u32, 4>::new();
+    /// let (mut producer, _consumer) = queue.split();
+    ///
+    /// assert_eq!(producer.push(7), Ok(()));
+    /// ```
     #[inline(always)]
     pub fn push(&mut self, val: T) -> Result<(), T> {
         self.queue.push(val)
     }
 
+    /// Pushes as many items from `slice` as fit, returning how many were written.
+    ///
+    /// The first `written` elements of `slice` are copied into the queue. If the
+    /// queue has less free space than `slice` is long, the remainder is not
+    /// written and the returned count is smaller than `slice.len()`. A return
+    /// value of `0` means the queue was full.
+    ///
+    /// This is more efficient than calling [`push`](Producer::push) in a loop
+    /// because the items are copied in bulk.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use axon::spsc::SpscQueue;
+    ///
+    /// let mut queue = SpscQueue::<u8, 8>::new();
+    /// let (mut producer, _consumer) = queue.split();
+    ///
+    /// let written = producer.push_slice(&[1, 2, 3, 4]);
+    /// assert_eq!(written, 4);
+    /// ```
     pub fn push_slice(&mut self, slice: &[T]) -> usize
     where
         T: Copy, // item must implement copy
@@ -153,6 +264,12 @@ impl<'a, T, const N: usize> Producer<'a, T, N> {
         to_write
     }
 
+    /// Returns the number of elements that can still be pushed before the queue
+    /// becomes full.
+    ///
+    /// This is a snapshot of a concurrent queue: another thread may be
+    /// consuming items at the same time, so the value can be stale as soon as
+    /// it is read. Treat it as an estimate.
     pub fn vacant_len(&self) -> usize {
         let head = self.queue.head.load(Ordering::Relaxed);
         let tail = self.queue.tail.load(Ordering::Acquire);
@@ -160,27 +277,86 @@ impl<'a, T, const N: usize> Producer<'a, T, N> {
         tail.wrapping_sub(head).wrapping_sub(1) & (N - 1)
     }
 
+    /// Returns the maximum capacity of the queue (`N - 1`).
+    #[inline(always)]
+    pub const fn capacity(&self) -> usize {
+        N - 1
+    }
+
+    /// Returns `true` if the queue currently has no vacant slots.
+    ///
+    /// Because the queue is concurrent this is only a snapshot; see
+    /// [`vacant_len`](Producer::vacant_len).
     #[inline(always)]
     pub fn is_full(&self) -> bool {
         self.vacant_len() == 0
     }
 
+    /// Returns `true` if the queue currently contains no elements.
+    ///
+    /// Because the queue is concurrent this is only a snapshot; see
+    /// [`vacant_len`](Producer::vacant_len).
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.vacant_len() == (N - 1)
     }
 }
 
+/// The consuming half of an [`SpscQueue`], obtained from [`SpscQueue::split`].
+///
+/// This handle owns the sole permission to dequeue values. It may be sent to
+/// another thread, but there must only ever be one [`Consumer`] per queue.
 pub struct Consumer<'a, T, const N: usize> {
     queue: &'a SpscQueue<T, N>,
 }
 
 impl<'a, T, const N: usize> Consumer<'a, T, N> {
+    /// Pops a single value from the queue.
+    ///
+    /// Returns `Some(value)` if an element was available, or `None` if the
+    /// queue was empty.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use axon::spsc::SpscQueue;
+    ///
+    /// let mut queue = SpscQueue::<u32, 4>::new();
+    /// let (mut producer, mut consumer) = queue.split();
+    ///
+    /// assert_eq!(consumer.pop(), None);
+    /// producer.push(7).unwrap();
+    /// assert_eq!(consumer.pop(), Some(7));
+    /// ```
     #[inline(always)]
     pub fn pop(&mut self) -> Option<T> {
         self.queue.pop()
     }
 
+    /// Pops items into `slice`, returning how many were read.
+    ///
+    /// Up to `slice.len()` elements are moved out of the queue and into the
+    /// front of `slice`. The returned count is the number actually read; it can
+    /// be less than `slice.len()` if the queue held fewer items, and `0` if the
+    /// queue was empty.
+    ///
+    /// This is more efficient than calling [`pop`](Consumer::pop) in a loop
+    /// because the items are copied in bulk.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use axon::spsc::SpscQueue;
+    ///
+    /// let mut queue = SpscQueue::<u8, 8>::new();
+    /// let (mut producer, mut consumer) = queue.split();
+    ///
+    /// producer.push_slice(&[1, 2, 3, 4]);
+    ///
+    /// let mut out = [0u8; 2];
+    /// assert_eq!(consumer.pop_slice(&mut out), 2);
+    /// assert_eq!(out, [1, 2]);
+    /// ```
     pub fn pop_slice(&mut self, slice: &mut [T]) -> usize
     where
         T: Copy,
@@ -217,6 +393,12 @@ impl<'a, T, const N: usize> Consumer<'a, T, N> {
         to_read
     }
 
+    /// Returns the number of elements currently held in the queue and available
+    /// to be popped.
+    ///
+    /// This is a snapshot of a concurrent queue: the producer may be pushing
+    /// items at the same time, so the value can be stale as soon as it is read.
+    /// Treat it as an estimate.
     #[inline(always)]
     pub fn occupied_len(&self) -> usize {
         let tail = self.queue.tail.load(Ordering::Relaxed);
@@ -224,11 +406,25 @@ impl<'a, T, const N: usize> Consumer<'a, T, N> {
         head.wrapping_sub(tail) & (N - 1)
     }
 
+    /// Returns the maximum capacity of the queue (`N - 1`).
+    #[inline(always)]
+    pub const fn capacity(&self) -> usize {
+        N - 1
+    }
+
+    /// Returns `true` if the queue currently contains no elements.
+    ///
+    /// Because the queue is concurrent this is only a snapshot; see
+    /// [`occupied_len`](Consumer::occupied_len).
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.occupied_len() == 0
     }
 
+    /// Returns `true` if the queue currently has no vacant slots.
+    ///
+    /// Because the queue is concurrent this is only a snapshot; see
+    /// [`occupied_len`](Consumer::occupied_len).
     #[inline(always)]
     pub fn is_full(&self) -> bool {
         self.occupied_len() == (N - 1)
