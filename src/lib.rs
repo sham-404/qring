@@ -59,6 +59,18 @@ mod tests {
         assert_eq!(out, [5, 10, 20, 30, 40, 50]);
     }
 
+    #[test]
+    fn miri_debug_formatting() {
+        struct NonDebug; // Type does not implement Debug
+
+        let mut queue = SpscQueue::<NonDebug, 8>::new();
+        let _ = core::format_args!("{:?}", queue);
+
+        let (producer, consumer) = queue.split();
+        let _ = core::format_args!("{:?}", producer);
+        let _ = core::format_args!("{:?}", consumer);
+    }
+
     /// Verifies Drop for SpscQueue correctly cleans up unconsumed items without leaks or double-frees using core only.
     #[test]
     fn miri_drop_unconsumed_leak_check() {

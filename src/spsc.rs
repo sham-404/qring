@@ -22,10 +22,7 @@
 //! ```
 
 use core::{
-    cell::UnsafeCell,
-    mem::MaybeUninit,
-    ops::{Deref, DerefMut},
-    sync::atomic::{AtomicUsize, Ordering},
+    cell::UnsafeCell, fmt, mem::MaybeUninit, ops::{Deref, DerefMut}, sync::atomic::{AtomicUsize, Ordering},
 };
 
 #[repr(align(64))]
@@ -70,6 +67,16 @@ unsafe impl<T: Send, const N: usize> Send for SpscQueue<T, N> {}
 impl<T, const N: usize> Drop for SpscQueue<T, N> {
     fn drop(&mut self) {
         while self.pop().is_some() {}
+    }
+}
+
+impl<T, const N: usize> fmt::Debug for SpscQueue<T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SpscQueue")
+            .field("capacity", &self.capacity())
+            .field("head", &self.head.load(Ordering::Relaxed))
+            .field("tail", &self.tail.load(Ordering::Relaxed))
+            .finish()
     }
 }
 
@@ -185,6 +192,15 @@ impl<T, const N: usize> SpscQueue<T, N> {
 /// another thread, but there must only ever be one [`Producer`] per queue.
 pub struct Producer<'a, T, const N: usize> {
     queue: &'a SpscQueue<T, N>,
+}
+
+impl<'a, T, const N: usize> fmt::Debug for Producer<'a, T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Producer")
+            .field("capacity", &self.capacity())
+            .field("vacant_len", &self.vacant_len())
+            .finish()
+    }
 }
 
 impl<'a, T, const N: usize> Producer<'a, T, N> {
@@ -343,6 +359,15 @@ impl<'a, T, const N: usize> Producer<'a, T, N> {
 /// another thread, but there must only ever be one [`Consumer`] per queue.
 pub struct Consumer<'a, T, const N: usize> {
     queue: &'a SpscQueue<T, N>,
+}
+
+impl<'a, T, const N: usize> fmt::Debug for Consumer<'a, T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Consumer")
+            .field("capacity", &self.capacity())
+            .field("occupied_len", &self.occupied_len())
+            .finish()
+    }
 }
 
 impl<'a, T, const N: usize> Consumer<'a, T, N> {
