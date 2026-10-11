@@ -1,8 +1,8 @@
-# axon
+# qring
 
 A high-performance, lock-free, zero-allocation single-producer single-consumer (SPSC) queue for Rust, with cache-aligned atomics.
 
-`axon` is a fixed-capacity bounded queue built on a power-of-two ring buffer. It is `#![no_std]`, dependency-free, and designed for low-latency, high-throughput data paths such as IPC channels, audio processing, and embedded/real-time systems where per-operation allocation and locks are unacceptable.
+`qring` is a fixed-capacity bounded queue built on a power-of-two ring buffer. It is `#![no_std]`, dependency-free, and designed for low-latency, high-throughput data paths such as IPC channels, audio processing, and embedded/real-time systems where per-operation allocation and locks are unacceptable.
 
 ## Features
 
@@ -18,24 +18,24 @@ A high-performance, lock-free, zero-allocation single-producer single-consumer (
 
 ## Installation
 
-Add `axon` to your `Cargo.toml`:
+Add `qring` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axon = "0.1"
+qring = "0.1"
 ```
 
 To use it on a target without `std`, disable default features (none are enabled by default):
 
 ```toml
 [dependencies]
-axon = { version = "0.1", default-features = false }
+qring = { version = "0.1", default-features = false }
 ```
 
 ## Quick Start
 
 ```rust
-use axon::spsc::SpscQueue;
+use qring::spsc::SpscQueue;
 
 // Capacity is a power-of-two const generic; usable capacity is N - 1.
 let mut queue = SpscQueue::<u32, 16>::new();
@@ -48,7 +48,7 @@ assert_eq!(consumer.pop(), Some(42));
 ### Producer and consumer on separate threads
 
 ```rust
-use axon::spsc::SpscQueue;
+use qring::spsc::SpscQueue;
 use std::thread;
 
 let mut queue = SpscQueue::<u64, 1024>::new();
@@ -84,7 +84,7 @@ assert_eq!(consumer.join().unwrap(), 49_995_000);
 ### Bulk transfers
 
 ```rust
-use axon::spsc::SpscQueue;
+use qring::spsc::SpscQueue;
 
 let mut queue = SpscQueue::<u8, 8>::new();
 let (mut producer, mut consumer) = queue.split();
@@ -156,7 +156,7 @@ Run the unit and integration tests:
 cargo test
 ```
 
-The integration test `tests/stress_test.rs` compares `axon` against `heapless::spsc` and `ringbuf::StaticRb` on a 100M-operation, 64-byte-payload workload with burst batching:
+The integration test `tests/stress_test.rs` compares `qring` against `heapless::spsc` and `ringbuf::StaticRb` on a 100M-operation, 64-byte-payload workload with burst batching:
 
 ```bash
 cargo test --release cmp_spsc_crates -- --nocapture

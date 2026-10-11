@@ -4,7 +4,7 @@ use std::hint::black_box;
 use std::thread;
 use std::time::Instant;
 
-use axon::spsc::SpscQueue;
+use qring::spsc::SpscQueue;
 use heapless::spsc::Queue as HeaplessQueue;
 use ringbuf::{StaticRb, traits::*};
 
@@ -123,7 +123,7 @@ fn cmp_spsc_crates() {
     println!("-------------------------------------------------------");
 
     run_real_world_bench!(
-        "Axon SpscQueue",
+        "qring SpscQueue",
         {
             let q = Box::leak(Box::new(SpscQueue::<Message, QUEUE_SIZE>::new()));
             q.split()

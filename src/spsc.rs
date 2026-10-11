@@ -12,7 +12,7 @@
 //! # Example
 //!
 //! ```
-//! use axon::spsc::SpscQueue;
+//! use qring::spsc::SpscQueue;
 //!
 //! let mut queue = SpscQueue::<u32, 16>::new();
 //! let (mut producer, mut consumer) = queue.split();
@@ -94,7 +94,7 @@ impl<T, const N: usize> SpscQueue<T, N> {
     /// # Example
     ///
     /// ```
-    /// use axon::spsc::SpscQueue;
+    /// use qring::spsc::SpscQueue;
     ///
     /// let queue = SpscQueue::<u8, 8>::new();
     /// assert_eq!(queue.capacity(), 7);
@@ -158,7 +158,7 @@ impl<T, const N: usize> SpscQueue<T, N> {
     /// # Example
     ///
     /// ```
-    /// use axon::spsc::SpscQueue;
+    /// use qring::spsc::SpscQueue;
     ///
     /// let mut queue = SpscQueue::<u32, 4>::new();
     /// let (mut producer, mut consumer) = queue.split();
@@ -196,7 +196,7 @@ impl<'a, T, const N: usize> Producer<'a, T, N> {
     /// # Example
     ///
     /// ```
-    /// use axon::spsc::SpscQueue;
+    /// use qring::spsc::SpscQueue;
     ///
     /// let mut queue = SpscQueue::<u32, 4>::new();
     /// let (mut producer, _consumer) = queue.split();
@@ -221,7 +221,7 @@ impl<'a, T, const N: usize> Producer<'a, T, N> {
     /// # Example
     ///
     /// ```
-    /// use axon::spsc::SpscQueue;
+    /// use qring::spsc::SpscQueue;
     ///
     /// let mut queue = SpscQueue::<u8, 8>::new();
     /// let (mut producer, _consumer) = queue.split();
@@ -276,7 +276,7 @@ impl<'a, T, const N: usize> Producer<'a, T, N> {
     /// # Example
     ///
     /// ```
-    /// use axon::spsc::SpscQueue;
+    /// use qring::spsc::SpscQueue;
     ///
     /// let mut queue = SpscQueue::<u8, 8>::new();
     /// let (mut producer, mut consumer) = queue.split();
@@ -354,7 +354,7 @@ impl<'a, T, const N: usize> Consumer<'a, T, N> {
     /// # Example
     ///
     /// ```
-    /// use axon::spsc::SpscQueue;
+    /// use qring::spsc::SpscQueue;
     ///
     /// let mut queue = SpscQueue::<u32, 4>::new();
     /// let (mut producer, mut consumer) = queue.split();
@@ -381,7 +381,7 @@ impl<'a, T, const N: usize> Consumer<'a, T, N> {
     /// # Example
     ///
     /// ```
-    /// use axon::spsc::SpscQueue;
+    /// use qring::spsc::SpscQueue;
     ///
     /// let mut queue = SpscQueue::<u8, 8>::new();
     /// let (mut producer, mut consumer) = queue.split();
@@ -441,7 +441,7 @@ impl<'a, T, const N: usize> Consumer<'a, T, N> {
     /// # Example
     ///
     /// ```
-    /// use axon::spsc::SpscQueue;
+    /// use qring::spsc::SpscQueue;
     ///
     /// let mut queue = SpscQueue::<u8, 8>::new();
     /// let (mut producer, mut consumer) = queue.split();

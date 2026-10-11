@@ -1,5 +1,5 @@
 [package]
-name = "axon"
+name = "qring"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
@@ -7,8 +7,8 @@ authors = ["Sham Sujith R"]
 license = "MIT OR Apache-2.0"
 description = "A high-performance, lock-free, zero-allocation SPSC queue with cache-aligned atomics."
 readme = "README.md"
-repository = "https://github.com/sham-404/axon"
-documentation = "https://docs.rs/axon"
+repository = "https://github.com/sham-404/qring"
+documentation = "https://docs.rs/qring"
 keywords = ["lock-free", "spsc", "queue", "no_std", "ring-buffer"]
 categories = ["concurrency", "data-structures", "no-std", "embedded"]
 
