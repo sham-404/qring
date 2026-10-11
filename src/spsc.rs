@@ -264,6 +264,41 @@ impl<'a, T, const N: usize> Producer<'a, T, N> {
         to_write
     }
 
+    /// Pushes every element of `slice`, or nothing at all.
+    ///
+    /// If the queue has at least `slice.len()` vacant slots, the whole slice is
+    /// copied in and `Ok(())` is returned. Otherwise the queue is left
+    /// untouched and `Err(())` is returned.
+    ///
+    /// Unlike [`push_slice`](Producer::push_slice), this is all-or-nothing: it
+    /// never writes a partial prefix of `slice`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use axon::spsc::SpscQueue;
+    ///
+    /// let mut queue = SpscQueue::<u8, 8>::new();
+    /// let (mut producer, mut consumer) = queue.split();
+    ///
+    /// assert_eq!(producer.push_exact(&[1, 2, 3]), Ok(()));
+    /// assert_eq!(consumer.occupied_len(), 3);
+    ///
+    /// // Only 4 slots remain, so this larger slice is rejected whole.
+    /// assert_eq!(producer.push_exact(&[4, 5, 6, 7, 8]), Err(()));
+    /// ```
+    pub fn push_exact(&mut self, slice: &[T]) -> Result<(), ()>
+    where
+        T: Copy,
+    {
+        if self.vacant_len() < slice.len() {
+            return Err(());
+        }
+
+        self.push_slice(slice);
+        Ok(())
+    }
+
     /// Returns the number of elements that can still be pushed before the queue
     /// becomes full.
     ///
@@ -391,6 +426,46 @@ impl<'a, T, const N: usize> Consumer<'a, T, N> {
         let next_tail = (tail + to_read) & (N - 1);
         self.queue.tail.store(next_tail, Ordering::Release);
         to_read
+    }
+
+
+    /// Pops exactly `slice.len()` elements into `slice`, or nothing at all.
+    ///
+    /// If the queue holds at least `slice.len()` elements, the whole `slice` is
+    /// filled and `Ok(())` is returned. Otherwise the queue and `slice` are left
+    /// untouched and `Err(())` is returned.
+    ///
+    /// Unlike [`pop_slice`](Consumer::pop_slice), this is all-or-nothing: it
+    /// never reads a partial prefix into `slice`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use axon::spsc::SpscQueue;
+    ///
+    /// let mut queue = SpscQueue::<u8, 8>::new();
+    /// let (mut producer, mut consumer) = queue.split();
+    ///
+    /// producer.push_slice(&[1, 2, 3, 4]);
+    ///
+    /// let mut out = [0u8; 3];
+    /// assert_eq!(consumer.pop_exact(&mut out), Ok(()));
+    /// assert_eq!(out, [1, 2, 3]);
+    ///
+    /// // Only one element remains, so this larger slice is rejected whole.
+    /// let mut too_big = [0u8; 4];
+    /// assert_eq!(consumer.pop_exact(&mut too_big), Err(()));
+    /// ```
+    pub fn pop_exact(&mut self, slice: &mut [T]) -> Result<(), ()>
+    where
+        T: Copy,
+    {
+        if self.occupied_len() < slice.len() {
+            return Err(());
+        }
+
+        self.pop_slice(slice);
+        Ok(())
     }
 
     /// Returns the number of elements currently held in the queue and available
